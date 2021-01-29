@@ -194,8 +194,8 @@ def train_ligannd():
 if __name__ == "__main__":
 
     directory = "data/ligands"
-    num_epochs = 10
-    num_steps = 8
+    num_epochs = 5000
+    num_steps = 16
     noise_scale = torch.Tensor([1e-2,1e-2,1e-2,0.0,0.0,0.0,0.0])
     learning_rate = 1e-4
 
@@ -210,22 +210,25 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(gnn.parameters(), lr=learning_rate)
 
     losses = []
-    for epoch in range(num_epochs):
+    try:
+        for epoch in range(num_epochs):
 
 
-        for ligand in nodes:
-            gnn.zero_grad()
-            ligand_in = ligand.clone() \
-                    + noise_scale * torch.randn_like(ligand) 
-            for step in range(num_steps):
-                ligand_in = gnn(ligand_in, template=ligand)
+            for ligand in nodes:
+                gnn.zero_grad()
+                ligand_in = ligand.clone() \
+                        + noise_scale * torch.randn_like(ligand) 
+                for step in range(num_steps):
+                    ligand_in = gnn(ligand_in, template=ligand)
 
-            loss = torch.mean(torch.abs(ligand-ligand_in)**2)
+                loss = torch.mean(torch.abs(ligand-ligand_in)**2)
 
-            loss.backward()
-            optimizer.step()
-        losses.append(loss)
-        print("loss at epoch {} = {:.3e}".format(epoch, loss))
+                loss.backward()
+                optimizer.step()
+            losses.append(loss)
+            print("loss at epoch {} = {:.3e}".format(epoch, loss))
+    except KeyboardInterrupt:
+        pass
 
 
     import pdb; pdb.set_trace()
