@@ -79,8 +79,10 @@ def parse_pdbqt(directory="data/ligands/", atom_dictionary=None):
 
 class ArcTan(nn.Module):
 
-    def init(self):
+    def __init__(self):
         super(ArcTan,self).__init__()
+        self.dim_h = 16
+        self.bond_cutoff = 3.6
 
     def forward(self, x):
 
@@ -88,7 +90,7 @@ class ArcTan(nn.Module):
 
 class GraphNN(nn.Module):
 
-    def init(self, ligand_dim=7):
+    def __init__(self, ligand_dim=7):
         super(GraphNN, self).__init__()
         
         self.ligand_dim = ligand_dim
@@ -97,22 +99,22 @@ class GraphNN(nn.Module):
         # https://pymolwiki.org/index.php/Displaying_Biochemical_Properties
         self.bond_cutoff = 3.6
 
-        self.initialize()
-        self.reset()
+        self.initialize_gnn()
+        self.reset_state()
 
-    def initialize(self):
+    def initialize_gnn(self):
 
         # vertices MLP, with 8 element key and query vectors for self-attention
         self.model = nn.Sequential(\
-                nn.Linear(self.ligand_dim, self.di_h),\
+                nn.Linear(self.ligand_dim, self.dim_h),\
                 ArcTan(),\
                 nn.Linear(self.dim_h, self.dim_h),\
                 ArcTan(),\
-                nn.Conv2D(self.dim_h, self.ligand_dim + 8 + 8)
+                nn.Linear(self.dim_h, self.dim_h + 8 + 8)
                 )
 
         self.encoder = nn.Sequential(\
-                nn.Linear(self.ligand_dim, self.dim_h),\
+                nn.Linear(self.dim_h, self.dim_h),\
                 ArcTan()\
                 )
 
@@ -133,23 +135,57 @@ class GraphNN(nn.Module):
             for jj in range(x.shape[0]):
                 node_jj = x[jj, 0:3]
 
-                distance = self.get_distance(node_0, node_1)
+                distance = self.get_distance(node_ii, node_jj)
                 if distance <= self.bond_cutoff:
                     self.graph[ii, jj] = 1.0
                 
 
-    def forward(self, x):
+    def forward(self, x, return_codes=False, template=None):
 
-        self.build_graph(x)
+        if template is not None:
+            self.build_graph(template)
+        else:
+            self.build_graph(x)
+        
+        new_graph = torch.zeros_like(x)
+        codes = torch.zeros(x.shape[0], self.dim_h)
+        temp_input = torch.zeros(x.shape[0], self.dim_h+8+8)
 
         for kk in range(x.shape[0]):
             # loop through nodes for each node
             for ll in range(x.shape[0]):
+                if self.graph[kk,ll]:
+                    
+                    temp_input[ll] = self.model(x[ll])#.unsqueeze(0)])
 
-                pass
+            keys = temp_input[:,-16:-8]
+            queries = temp_input[:,-8:]
 
-    def reset(self):
+            attention = torch.zeros(1, keys.shape[0])
+
+            for mm in range(keys.shape[0]):
+                attention[:, mm] = torch.matmul(queries[mm], keys[mm].T)
+
+            attention = torch.softmax(attention, dim=1)
+
+            my_input = torch.sum(attention.T * temp_input[:,:self.dim_h],dim=0)
+
+            #this is where the cell gating would happen (TODO)
+            codes[kk] = self.encoder(my_input)
+
+            new_graph[kk] = self.decoder(codes[kk])
+
+        self.new_graphs.append(new_graph)
+
+        if return_codes:
+            return codes, new_graph
+        else:
+            return new_graph
+
+
+    def reset_state(self):
         # initialize using gated cell states here later (maybe)
+        self.new_graphs = []
         pass
 
 
@@ -160,9 +196,45 @@ def train_ligannd():
 if __name__ == "__main__":
 
     directory = "data/ligands"
+    num_epochs = 10
+    num_steps = 1
+    noise_scale = 0.0
+    learning_rate = 1e-4
+
+    torch.autograd.set_detect_anomaly(True)
 
     atom_dictionary = atom_tokens()
     nodes, raw_nodes = parse_pdbqt(directory)
-    import pdb; pdb.set_trace()
+    
+    nodes = [torch.Tensor(elem) for elem in nodes]
+
+    gnn = GraphNN() 
+    optimizer = torch.optim.Adam(gnn.parameters(), lr=learning_rate)
+
+    for epoch in range(num_epochs):
+
+        gnn.zero_grad()
+        loss = 0.0
+
+        for ligand in nodes:
+            ligand_in = ligand.clone() \
+                    + noise_scale * torch.randn_like(ligand) 
+            for step in range(num_steps):
+
+                ligand_in = gnn(ligand_in, template=ligand)
+
+            loss = torch.mean(torch.abs(ligand-ligand_in)**2)
+
+            loss.backward()
+            optimize.step()
+
+        print("loss at epoch {} = {:.3e}".format(epoch, loss))
 
 
+
+            
+
+
+
+
+            
