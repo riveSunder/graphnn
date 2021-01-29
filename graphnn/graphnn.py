@@ -4,7 +4,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-import matplotlib.pyplot
+import matplotlib.pyplot as plt
+import gc
 
 def atom_tokens(my_seed=13):
     np.random.seed(my_seed)
@@ -108,11 +109,11 @@ class GraphNN(nn.Module):
                 ArcTan(),\
                 nn.Linear(self.dim_h, self.dim_h),\
                 ArcTan(),\
-                nn.Linear(self.dim_h, self.dim_h + 8 + 8)
+                nn.Linear(self.dim_h, self.ligand_dim + 8 + 8)
                 )
 
         self.encoder = nn.Sequential(\
-                nn.Linear(self.dim_h, self.dim_h),\
+                nn.Linear(2*self.ligand_dim, self.dim_h),\
                 ArcTan()\
                 )
 
@@ -141,9 +142,9 @@ class GraphNN(nn.Module):
     def forward(self, x, return_codes=False, template=None):
 
         if template is not None:
-            self.build_graph(template)
+            self.build_graph(template.detach())
         else:
-            self.build_graph(x)
+            self.build_graph(x.detach())
         
         new_graph = torch.Tensor() #torch.zeros_like(x)
         codes = torch.Tensor() #torch.zeros(x.shape[0], self.dim_h)
@@ -154,7 +155,6 @@ class GraphNN(nn.Module):
             # loop through nodes for each node
             for ll in range(x.shape[0]):
                 if self.graph[kk,ll]:
-                    
                     temp_input[-1] = torch.cat([temp_input[-1],\
                             self.model(x[ll]).unsqueeze(0)])
 
@@ -168,7 +168,9 @@ class GraphNN(nn.Module):
 
             attention = torch.softmax(attention, dim=1)
 
-            my_input = torch.sum(attention.T * temp_input[-1][:,:self.dim_h],dim=0)
+            my_input = torch.sum(attention.T \
+                    * temp_input[-1][:,:self.ligand_dim],dim=0)
+            my_input = torch.cat([x[kk], my_input])
 
             #this is where the cell gating would happen (TODO)
             codes = torch.cat([codes, self.encoder(my_input).unsqueeze(0)])
@@ -187,19 +189,14 @@ class GraphNN(nn.Module):
         pass
 
 
-def train_ligannd():
-
-    pass
 
 if __name__ == "__main__":
 
     directory = "data/ligands"
     num_epochs = 5000
-    num_steps = 16
+    num_steps = 8
     noise_scale = torch.Tensor([1e-2,1e-2,1e-2,0.0,0.0,0.0,0.0])
     learning_rate = 1e-4
-
-    torch.autograd.set_detect_anomaly(True)
 
     atom_dictionary = atom_tokens()
     nodes, raw_nodes = parse_pdbqt(directory)
@@ -221,12 +218,13 @@ if __name__ == "__main__":
                 for step in range(num_steps):
                     ligand_in = gnn(ligand_in, template=ligand)
 
-                loss = torch.mean(torch.abs(ligand-ligand_in)**2)
+                loss = torch.mean(torch.abs(ligand[0:3]-ligand_in[0:3])**2)
 
                 loss.backward()
                 optimizer.step()
-            losses.append(loss)
+            losses.append(loss.detach())
             print("loss at epoch {} = {:.3e}".format(epoch, loss))
+            gc.collect()
     except KeyboardInterrupt:
         pass
 
