@@ -81,8 +81,6 @@ class ArcTan(nn.Module):
 
     def __init__(self):
         super(ArcTan,self).__init__()
-        self.dim_h = 16
-        self.bond_cutoff = 3.6
 
     def forward(self, x):
 
@@ -94,7 +92,7 @@ class GraphNN(nn.Module):
         super(GraphNN, self).__init__()
         
         self.ligand_dim = ligand_dim
-        self.dim_h = 16
+        self.dim_h = 8
         # This is a guesstimate based on: 
         # https://pymolwiki.org/index.php/Displaying_Biochemical_Properties
         self.bond_cutoff = 3.6
@@ -147,19 +145,21 @@ class GraphNN(nn.Module):
         else:
             self.build_graph(x)
         
-        new_graph = torch.zeros_like(x)
-        codes = torch.zeros(x.shape[0], self.dim_h)
-        temp_input = torch.zeros(x.shape[0], self.dim_h+8+8)
+        new_graph = torch.Tensor() #torch.zeros_like(x)
+        codes = torch.Tensor() #torch.zeros(x.shape[0], self.dim_h)
+        temp_input = [torch.Tensor()] 
+        #orch.Tensor() #torch.zeros(x.shape[0], self.dim_h+8+8)
 
         for kk in range(x.shape[0]):
             # loop through nodes for each node
             for ll in range(x.shape[0]):
                 if self.graph[kk,ll]:
                     
-                    temp_input[ll] = self.model(x[ll])#.unsqueeze(0)])
+                    temp_input[-1] = torch.cat([temp_input[-1],\
+                            self.model(x[ll]).unsqueeze(0)])
 
-            keys = temp_input[:,-16:-8]
-            queries = temp_input[:,-8:]
+            keys = temp_input[-1][:,-16:-8]
+            queries = temp_input[-1][:,-8:]
 
             attention = torch.zeros(1, keys.shape[0])
 
@@ -168,14 +168,13 @@ class GraphNN(nn.Module):
 
             attention = torch.softmax(attention, dim=1)
 
-            my_input = torch.sum(attention.T * temp_input[:,:self.dim_h],dim=0)
+            my_input = torch.sum(attention.T * temp_input[-1][:,:self.dim_h],dim=0)
 
             #this is where the cell gating would happen (TODO)
-            codes[kk] = self.encoder(my_input)
+            codes = torch.cat([codes, self.encoder(my_input).unsqueeze(0)])
 
-            new_graph[kk] = self.decoder(codes[kk])
+            new_graph = torch.cat([new_graph, self.decoder(codes[-1]).unsqueeze(0)])
 
-        self.new_graphs.append(new_graph)
 
         if return_codes:
             return codes, new_graph
@@ -185,7 +184,6 @@ class GraphNN(nn.Module):
 
     def reset_state(self):
         # initialize using gated cell states here later (maybe)
-        self.new_graphs = []
         pass
 
 
@@ -197,8 +195,8 @@ if __name__ == "__main__":
 
     directory = "data/ligands"
     num_epochs = 10
-    num_steps = 1
-    noise_scale = 0.0
+    num_steps = 8
+    noise_scale = torch.Tensor([1e-2,1e-2,1e-2,0.0,0.0,0.0,0.0])
     learning_rate = 1e-4
 
     torch.autograd.set_detect_anomaly(True)
@@ -211,24 +209,26 @@ if __name__ == "__main__":
     gnn = GraphNN() 
     optimizer = torch.optim.Adam(gnn.parameters(), lr=learning_rate)
 
+    losses = []
     for epoch in range(num_epochs):
 
-        gnn.zero_grad()
-        loss = 0.0
 
         for ligand in nodes:
+            gnn.zero_grad()
             ligand_in = ligand.clone() \
                     + noise_scale * torch.randn_like(ligand) 
             for step in range(num_steps):
-
                 ligand_in = gnn(ligand_in, template=ligand)
 
             loss = torch.mean(torch.abs(ligand-ligand_in)**2)
 
             loss.backward()
-            optimize.step()
-
+            optimizer.step()
+        losses.append(loss)
         print("loss at epoch {} = {:.3e}".format(epoch, loss))
+
+
+    import pdb; pdb.set_trace()
 
 
 
