@@ -1,6 +1,6 @@
 # graphnn
 
-Graph Neural Networks are becoming a dominant architecture for problem domains that natural lend themselves to formulation as a graph. In particular, GNNs are drawing substantial interest for computational chemistry for drug design and development. Before diving into the various GNN libraries that are available I wanted to build one from (almost) scratch as an exercise. 
+Graph Neural Networks are becoming a dominant architecture for problem domains that lend themselves to formulation as a graph. In particular, GNNs are drawing substantial interest for computational chemistry for drug design and development. Before diving into the various GNN libraries that are available I wanted to build one from (almost) scratch as an exercise. 
 
 This is related to my [DockRL](https://github.com/rivesunder/DockRL) project for molecular docking optimization from a reinforcment learning and evolutionary strategies perspective.
 
